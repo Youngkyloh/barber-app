@@ -14,7 +14,9 @@ if 'logado' not in st.session_state:
     st.session_state.update({'logado': False, 'perfil': None, 'dados': {}})
 
 status_licenca = sec.checar_licenca()
-if status_licenca == "bloqueado" and st.session_state['perfil'] != 'dono':
+
+# Bloqueio do sistema (Apenas o perfil 'deus' consegue ver a trava interna)
+if status_licenca == "bloqueado" and st.session_state['perfil'] != 'deus':
     st.error("⚠️ Sistema temporariamente indisponível. Retorne mais tarde.")
     with st.expander("⚙️ Acesso Restrito"):
         senha_god = st.text_input("Senha Mestra:", type="password")
@@ -49,10 +51,13 @@ if not st.session_state['logado']:
                     st.rerun()
                     
     with tab_equipe:
-        usuario = st.text_input("Usuário (Nome ou 'admin')")
+        usuario = st.text_input("Usuário")
         senha = st.text_input("Senha", type="password")
         if st.button("Acessar"):
-            if usuario == "admin" and senha == "adson2026":
+            if usuario == "deus" and senha == "adson2026":
+                st.session_state.update({'logado': True, 'perfil': 'deus'})
+                st.rerun()
+            elif usuario == "dono" and senha == "dono123":
                 st.session_state.update({'logado': True, 'perfil': 'dono'})
                 st.rerun()
             elif db.verificar_login_barbeiro(usuario, senha):
@@ -63,12 +68,18 @@ if not st.session_state['logado']:
     st.stop()
 
 # ==========================================
-# NAVEGAÇÃO
+# NAVEGAÇÃO POR PERFIL
 # ==========================================
 perfil = st.session_state['perfil']
 st.sidebar.title("✂️ BarberApp")
 
-telas = {"cliente": ["Loja & Agendamento"], "barbeiro": ["Painel do Barbeiro"], "dono": ["Loja & Agendamento", "Painel do Barbeiro", "Gestão (Dono)"]}
+# Mapeamento estrito de quem pode ver o que
+telas = {
+    "cliente": ["Loja & Agendamento"],
+    "barbeiro": ["Painel do Barbeiro"],
+    "dono": ["Loja & Agendamento", "Painel do Barbeiro", "Gestão (Dono)"],
+    "deus": ["Loja & Agendamento", "Painel do Barbeiro", "Gestão (Dono)"]
+}
 menu = st.sidebar.radio("Navegação", telas[perfil])
 
 st.sidebar.markdown("---")
@@ -76,9 +87,10 @@ if st.sidebar.button("🚪 Sair (Logout)"):
     st.session_state.update({'logado': False, 'perfil': None, 'dados': {}})
     st.rerun()
 
-if perfil == 'dono':
+# EXCLUSIVO ADMIN DEUS: O Dono da loja não vê este bloco de licença
+if perfil == 'deus':
     st.sidebar.markdown("---")
-    with st.sidebar.expander("⚙️ Admin Agência"):
+    with st.sidebar.expander("⚙️ Admin Agência (DEUS)"):
         status_selecionado = st.selectbox("Status da Licença", ["ativo", "bloqueado"], index=["ativo", "bloqueado"].index(status_licenca))
         if st.button("Atualizar Licença"):
             sec.mudar_licenca(status_selecionado)
@@ -88,7 +100,7 @@ lista_barbeiros = db.get_barbeiros()
 df_catalogo = db.get_catalogo()
 
 # ==========================================
-# TELA 1: ÁREA DO CLIENTE
+# TELA 1: ÁREA DO CLIENTE / LOJA
 # ==========================================
 if menu == "Loja & Agendamento":
     st.title("Atendimento & Loja")
@@ -100,7 +112,6 @@ if menu == "Loja & Agendamento":
     
     st.info(f"**{detalhes_item['tipo']}** | Valor: R$ {detalhes_item['preco']:.2f}")
     
-    # Se for serviço, exige barbeiro e horário
     if detalhes_item['tipo'] == 'Serviço':
         col1, col2 = st.columns(2)
         with col1:
@@ -121,8 +132,6 @@ if menu == "Loja & Agendamento":
                 st.success("Registrado!")
                 msg = f"🔔 *NOVO AGENDAMENTO*\n{nome_cliente} marcou {item_selecionado} com {barbeiro} dia {data_escolhida.strftime('%d/%m')} às {hora}."
                 st.markdown(f"### [📲 Enviar Confirmação via WhatsApp](https://wa.me/5571981205061?text={urllib.parse.quote(msg)})")
-                
-    # Se for Produto ou Assinatura, não precisa de hora, só compra direto com o atendente/barbeiro
     else:
         barbeiro = st.selectbox("Quem está te atendendo? (Para comissão)", lista_barbeiros)
         if st.button(f"Confirmar Compra de {detalhes_item['tipo']}", type="primary"):
@@ -161,7 +170,7 @@ elif menu == "Painel do Barbeiro":
                     st.rerun()
 
 # ==========================================
-# TELA 3: GESTÃO DO DONO
+# TELA 3: GESTÃO DO DONO / DEUS (Acesso Completo às Operações)
 # ==========================================
 elif menu == "Gestão (Dono)":
     st.title("Painel Administrativo")
@@ -174,39 +183,61 @@ elif menu == "Gestão (Dono)":
         if df_todos.empty:
             st.info("Nenhum registro no banco de dados.")
         else:
-            # Faturamento Real = Apenas os Concluídos
             concluidos = df_todos[df_todos['status'] == 'Concluído']
             faltas = df_todos[df_todos['status'] == 'Falta (Não Compareceu)']
             
             col1, col2, col3 = st.columns(3)
-            col1.metric("Dinheiro no Caixa (Concluídos)", f"R$ {concluidos['valor'].sum():,.2f}")
+            col1.metric("Dinheiro no Caixa", f"R$ {concluidos['valor'].sum():,.2f}")
             col2.metric("Atendimentos Feitos", len(concluidos))
             col3.metric("Prejuízo por Faltas", f"R$ {faltas['valor'].sum():,.2f}")
             
     with tab2:
-        st.subheader("Gerenciar Serviços, Produtos e Assinaturas")
+        st.subheader("Gerenciar Catálogo")
         st.dataframe(df_catalogo, hide_index=True, use_container_width=True)
         
-        with st.form("form_catalogo"):
-            st.write("Adicionar ou Alterar Preço")
-            nome_item = st.text_input("Nome do Item (Ex: Corte Navalhado)")
-            tipo_item = st.selectbox("Categoria", ["Serviço", "Produto", "Assinatura"])
-            preco_item = st.number_input("Preço (R$)", min_value=0.0, step=5.0)
-            
-            if st.form_submit_button("Salvar no Catálogo"):
-                if nome_item:
-                    db.add_item_catalogo(nome_item, tipo_item, preco_item)
-                    st.success(f"{nome_item} atualizado com sucesso!")
-                    st.rerun()
+        col_cad, col_exc = st.columns(2)
+        
+        with col_cad:
+            with st.form("form_catalogo"):
+                st.write("### Adicionar ou Alterar")
+                nome_item = st.text_input("Nome do Item")
+                tipo_item = st.selectbox("Categoria", ["Serviço", "Produto", "Assinatura"])
+                preco_item = st.number_input("Preço (R$)", min_value=0.0, step=5.0)
+                if st.form_submit_button("Salvar no Catálogo"):
+                    if nome_item:
+                        db.add_item_catalogo(nome_item, tipo_item, preco_item)
+                        st.success("Item atualizado!")
+                        st.rerun()
+                        
+        with col_exc:
+            st.write("### Remover do Catálogo")
+            item_remover = st.selectbox("Selecione o item para deletar:", df_catalogo['item'].tolist(), key="del_item")
+            if st.button("❌ Excluir Item permanentemente", type="secondary"):
+                db.delete_item_catalogo(item_remover)
+                st.success("Item removido do catálogo.")
+                st.rerun()
                 
     with tab3:
         st.subheader("Gerenciar Equipe")
-        st.write(f"Ativos: {', '.join(lista_barbeiros)}")
-        with st.form("form_equipe"):
-            novo_barbeiro = st.text_input("Nome do novo profissional:")
-            senha_barbeiro = st.text_input("Senha de acesso dele:", type="password")
-            if st.form_submit_button("Cadastrar Profissional"):
-                if novo_barbeiro and senha_barbeiro:
-                    db.add_barbeiro(novo_barbeiro, senha_barbeiro)
-                    st.success("Cadastrado com sucesso!")
-                    st.rerun()
+        st.write(f"Profissionais Ativos: `{', '.join(lista_barbeiros)}`")
+        
+        col_cad_b, col_exc_b = st.columns(2)
+        
+        with col_cad_b:
+            with st.form("form_equipe"):
+                st.write("### Novo Profissional")
+                novo_barbeiro = st.text_input("Nome do Barbeiro:")
+                senha_barbeiro = st.text_input("Senha de acesso:", type="password")
+                if st.form_submit_button("Cadastrar Profissional"):
+                    if novo_barbeiro and senha_barbeiro:
+                        db.add_barbeiro(novo_barbeiro, senha_barbeiro)
+                        st.success("Cadastrado com sucesso!")
+                        st.rerun()
+                        
+        with col_exc_b:
+            st.write("### Remover da Equipe")
+            barbeiro_remover = st.selectbox("Selecione o barbeiro para desligar:", lista_barbeiros, key="del_barber")
+            if st.button("❌ Remover Profissional do Sistema", type="secondary"):
+                db.delete_barbeiro(barbeiro_remover)
+                st.success("Profissional removido da equipe.")
+                st.rerun()
